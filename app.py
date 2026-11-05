@@ -30,7 +30,7 @@ from result_workflow import save_verified_result, ExistingResultConflict
 from pdf_report import generate_result_pdf, result_pdf_filename
 from campus_auth import CAMPUSES, authenticate, clean_campus_secrets, validate_passwords
 
-st.set_page_config(page_title='Sri Chaitanya | OMR Result Portal V2.1',page_icon='📋',layout='wide')
+st.set_page_config(page_title='Sri Chaitanya | OMR Result Portal V2.3',page_icon='📋',layout='wide')
 st.markdown('''<style>
 .block-container {max-width:1150px;padding-top:1.5rem}
 [data-testid="stFileUploader"] {border-radius:12px}
@@ -135,7 +135,7 @@ with st.sidebar:
     if role=='admin':
         st.caption('Verification service: '+('Configured' if secret('GEMINI_API_KEY').strip() else 'Not configured'))
 
-tabs=['Evaluate OMR','Saved Results']+(['Answer Key Admin'] if role=='admin' else [])
+tabs=['Evaluate OMR']+(['Saved Results','Answer Key Admin'] if role=='admin' else [])
 views=st.tabs(tabs)
 
 # A key was just published on the Admin tab. Apply the new selection BEFORE
@@ -493,34 +493,35 @@ with views[0]:
                     file_name=f"{saved_payload['exam_type']}_{saved_payload['class_name']}_"
                               f"{saved_payload['paper_code']}_result.csv",mime='text/csv')
 
-with views[1]:
-    st.subheader('Saved results')
-    try:
-        saved=store.list_results()
-        if saved:
-            table=pd.DataFrame(saved)
-            st.dataframe(table,hide_index=True,use_container_width=True)
-            st.download_button('Export results summary CSV',data=table.to_csv(index=False).encode('utf-8-sig'),file_name='SCAT_results_export.csv',mime='text/csv')
-            st.divider()
-            st.markdown('**Download a previously saved student result PDF**')
-            chosen=st.selectbox('Saved student',saved,
-                format_func=lambda r: f"{r.get('student_name','')} | {r.get('roll_number','')} | "
-                                      f"{r.get('exam_type','')} | {r.get('exam_date','')}",
-                key='saved_pdf_selection')
-            if chosen:
-                try:
-                    stored=store.get_result_by_id(chosen['id'])
-                    if stored:
-                        st.download_button('Download selected result PDF',
-                            data=generate_result_pdf(stored),
-                            file_name=result_pdf_filename(stored),mime='application/pdf',
-                            use_container_width=True,key='saved_pdf_download')
-                    else:
-                        st.warning('Selected record could not be loaded from the database.')
-                except Exception as error:
-                    st.error(f'Could not prepare the saved PDF: {error}')
-        else:st.info('No results saved yet.')
-    except Exception as e:st.error(f'Could not load saved results: {e}')
+if role=='admin':
+    with views[1]:
+        st.subheader('Saved results')
+        try:
+            saved=store.list_results()
+            if saved:
+                table=pd.DataFrame(saved)
+                st.dataframe(table,hide_index=True,use_container_width=True)
+                st.download_button('Export results summary CSV',data=table.to_csv(index=False).encode('utf-8-sig'),file_name='SCAT_results_export.csv',mime='text/csv')
+                st.divider()
+                st.markdown('**Download a previously saved student result PDF**')
+                chosen=st.selectbox('Saved student',saved,
+                    format_func=lambda r: f"{r.get('student_name','')} | {r.get('roll_number','')} | "
+                                          f"{r.get('exam_type','')} | {r.get('exam_date','')}",
+                    key='saved_pdf_selection')
+                if chosen:
+                    try:
+                        stored=store.get_result_by_id(chosen['id'])
+                        if stored:
+                            st.download_button('Download selected result PDF',
+                                data=generate_result_pdf(stored),
+                                file_name=result_pdf_filename(stored),mime='application/pdf',
+                                use_container_width=True,key='saved_pdf_download')
+                        else:
+                            st.warning('Selected record could not be loaded from the database.')
+                    except Exception as error:
+                        st.error(f'Could not prepare the saved PDF: {error}')
+            else:st.info('No results saved yet.')
+        except Exception as e:st.error(f'Could not load saved results: {e}')
 
 if role=='admin':
     with views[2]:
