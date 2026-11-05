@@ -23,6 +23,7 @@ RESULT_HEADERS = [
     'Exam_Center', 'Total', 'Maximum', 'Percentage', 'Verification_Status',
     'Review_Questions', 'Physics', 'Chemistry', 'Maths', 'Biology', 'IQ',
     'Image_Hash', 'Subjects_JSON', 'Answers_JSON', 'Question_Evaluation_JSON',
+    'Campus', 'Checked_By',
 ]
 KEY_HEADERS = ['Key_ID', 'Saved_At_UTC', 'CSV_Text']
 
@@ -99,6 +100,15 @@ class SheetsStore:
                                   'backgroundColor': {'red': 0.88, 'green': 0.92, 'blue': 0.98}})
             except Exception:
                 pass  # Formatting is optional; persistence must still work.
+        elif title == 'Results' and existing == expected_headers[:-2]:
+            # Non-destructive migration: old results remain in place and keep
+            # their existing column positions. New audit columns are appended.
+            required_columns=len(expected_headers)
+            available_columns=getattr(ws,'col_count',required_columns)
+            if available_columns < required_columns:
+                ws.add_cols(required_columns-available_columns)
+            ws.update(range_name='A1:AE1',values=[expected_headers],
+                      value_input_option='RAW')
         elif existing != expected_headers:
             raise RuntimeError(
                 f'Tab "{title}" has unexpected columns. Please use a new empty '
@@ -128,6 +138,7 @@ class SheetsStore:
             marks('Biology'), marks('IQ'), payload['image_hash'],
             _json(subjects), _json(payload.get('answers', {})),
             _json(payload.get('question_evaluation', [])),
+            payload.get('campus',''),payload.get('checked_by',''),
         ]
         assert len(vals) == len(RESULT_HEADERS)
         # RAW means spreadsheet will not execute a student's name as a formula.
@@ -169,7 +180,7 @@ class SheetsStore:
         row = self._result_row(payload)
         row[0] = old[0]  # record ID
         row[1] = old[1] if len(old) > 1 else ''  # initial save time
-        end_col = 'AC'  # 29 existing columns; do not change the Sheets schema
+        end_col = 'AE'  # 31 columns; includes campus and login identity
         self.results.update(range_name=f'A{row_idx}:{end_col}{row_idx}',
                             values=[row], value_input_option='RAW')
         return True
@@ -192,6 +203,7 @@ class SheetsStore:
                 'student_name': get('Student_Name'), 'total': get('Total'),
                 'maximum': get('Maximum'), 'verification_status': get('Verification_Status'),
                 'school': get('School'), 'school_city': get('School_City'),
+                'campus': get('Campus'), 'checked_by': get('Checked_By'),
                 'sheet_row': ix,
             })
             if len(out) >= min(limit, 1000):
@@ -221,6 +233,7 @@ class SheetsStore:
             'school': col('School'), 'school_city': col('School_City'),
             'student_phone': col('Student_Phone'), 'parent_phone': col('Parent_Phone'),
             'gender': col('Gender'), 'exam_center': col('Exam_Center'),
+            'campus': col('Campus'), 'checked_by': col('Checked_By'),
             'total': float(col('Total') or 0), 'maximum': float(col('Maximum') or 0),
             'verification_status': col('Verification_Status'),
             'reviewed_questions': [int(x) for x in col('Review_Questions').split(',') if x.strip().isdigit()],

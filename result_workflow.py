@@ -25,7 +25,7 @@ def _matches_saved(existing: dict, current: dict) -> bool:
         'image_hash', 'exam_date', 'exam_type', 'class_name', 'paper_code',
         'paper_version', 'roll_number', 'student_name', 'school', 'school_city',
         'student_phone', 'parent_phone', 'gender', 'exam_center',
-        'verification_status',
+        'verification_status', 'campus', 'checked_by',
     )
     for field in text_fields:
         if str(existing.get(field) or '').strip().casefold() != str(current.get(field) or '').strip().casefold():

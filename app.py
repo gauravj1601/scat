@@ -28,6 +28,7 @@ from storage import Store,DuplicateResult
 from sheets_storage import SheetsStore
 from result_workflow import save_verified_result, ExistingResultConflict
 from pdf_report import generate_result_pdf, result_pdf_filename
+from campus_auth import CAMPUSES, authenticate, clean_campus_secrets, validate_passwords
 
 st.set_page_config(page_title='Sri Chaitanya | OMR Result Portal V2.1',page_icon='📋',layout='wide')
 st.markdown('''<style>
@@ -43,22 +44,42 @@ def secret(name,default=''):
 
 
 def log_in():
-    staff_pass=secret('APP_PASSWORD')
     admin_pass=secret('ADMIN_PASSWORD')
-    if not staff_pass:
-        st.error('App password is not configured. Set APP_PASSWORD in Streamlit secrets or environment variables. See README.md.')
+    legacy_pass=secret('APP_PASSWORD')
+    try:
+        raw_campus_passwords=st.secrets.get('campus_passwords', {})
+    except Exception:
+        raw_campus_passwords={}  # Retain environment/legacy login compatibility.
+    try:
+        campus_passwords=clean_campus_secrets(raw_campus_passwords)
+        validate_passwords(admin_pass,campus_passwords,legacy_pass)
+    except Exception as exc:
+        st.error('Campus login settings need correction: '+str(exc))
         st.stop()
-    if st.session_state.get('role') in ('staff','admin'):
+    if not (campus_passwords or legacy_pass or admin_pass):
+        st.error('No portal passwords configured. Set [campus_passwords] and ADMIN_PASSWORD in Streamlit secrets.')
+        st.stop()
+
+    if (st.session_state.get('role') in ('staff','admin') and
+            st.session_state.get('login_label')):
         return st.session_state['role']
+    # Existing sessions from older releases must sign in again so their campus
+    # attribution is known rather than silently set to an arbitrary campus.
+    for state_key in ('role','login_label','authenticated_campus'):
+        st.session_state.pop(state_key,None)
     st.title('Sri Chaitanya — OMR Result Portal')
     st.caption('Authorized staff access only')
     with st.form('login'):
         entered=st.text_input('Portal password',type='password')
         go=st.form_submit_button('Sign in',type='primary')
     if go:
-        if admin_pass and entered==admin_pass:st.session_state['role']='admin';st.rerun()
-        elif entered==staff_pass:st.session_state['role']='staff';st.rerun()
-        else:st.error('Incorrect password.')
+        identity=authenticate(entered,admin_pass,campus_passwords,legacy_pass)
+        if identity:
+            st.session_state['role']=identity.role
+            st.session_state['login_label']=identity.label
+            st.session_state['authenticated_campus']=identity.home_campus
+            st.rerun()
+        st.error('Incorrect password.')
     st.stop()
 
 role=log_in()
@@ -106,7 +127,7 @@ def encode_for_gemini(image):
 st.title('SCAT / SCIMED / YSTT — OMR Results')
 st.caption('Internal examination evaluation • automatic quality review')
 with st.sidebar:
-    st.write('**Signed in as:** '+role.title())
+    st.write('**Signed in as:** '+st.session_state['login_label'])
     st.write('**Database:** '+('Google Sheets (persistent)' if getattr(store, 'is_sheets', False) else ('Supabase (persistent)' if store.is_cloud else 'Local SQLite (server disk)')))
     if st.button('Log out'):
         st.session_state.clear();st.rerun()
@@ -132,6 +153,13 @@ with views[0]:
         st.error(f'Could not load keys: {e}');st.stop()
     if st.session_state.pop('published_key_notice',False):
         st.success('Answer key published to the database. The exam, class, code and version below have been selected automatically.')
+
+    # Campus is chosen for EACH evaluation. A staff password identifies the
+    # login campus; the separately selected campus identifies the examination.
+    default_campus=st.session_state.get('authenticated_campus') or CAMPUSES[0]
+    campus=st.selectbox('Select campus', CAMPUSES,
+        index=CAMPUSES.index(default_campus), key='select_exam_campus')
+    st.caption('The selected campus and signed-in login label will both be saved with the result.')
 
     # These selectors intentionally live OUTSIDE a Streamlit form. Changes to
     # exam, class and paper code refresh the available versions immediately.
@@ -173,7 +201,7 @@ with views[0]:
     front_bytes=front_photo.getvalue() if front_photo is not None else b''
     back_bytes=back_photo.getvalue() if back_photo is not None else b''
     signature=hashlib.sha256(front_bytes+back_bytes+repr((selected,event_date.isoformat(),front_rotation,back_rotation)).encode()+
-                             (to_csv(chosen_rows) if chosen_rows else b'')).hexdigest()
+                             (to_csv(chosen_rows) if chosen_rows else b'')+campus.encode()).hexdigest()
     configured_key=secret('GEMINI_API_KEY').strip()
     if not configured_key and role=='admin':
         st.info('Independent Gemini checking is not configured. Python will evaluate the OMR and uncertain bubbles will require staff confirmation. Set GEMINI_API_KEY in .streamlit/secrets.toml to enable the second check.')
@@ -372,6 +400,7 @@ with views[0]:
                         payload={
                             'image_hash':work['image_hash'],'exam_date':work['date'],
                             'exam_type':exam,'class_name':class_name,
+                            'campus':campus,'checked_by':st.session_state['login_label'],
                             'paper_code':paper_code,'paper_version':version,
                             'roll_number':roll.strip(),'student_name':name.strip(),
                             'total':calculated['total'],'maximum':calculated['maximum'],
@@ -436,7 +465,8 @@ with views[0]:
             st.subheader('Examination Result')
             st.write(f"**Student:** {saved_payload['student_name']}   |   "
                      f"**Roll No:** {saved_payload['roll_number']}   |   "
-                     f"**Exam:** {saved_payload['exam_type']}")
+                     f"**Exam:** {saved_payload['exam_type']}   |   "
+                     f"**Campus:** {saved_payload.get('campus','-')}")
             a,b=st.columns(2)
             a.metric('Total marks',f"{saved_payload['total']:g} / {saved_payload['maximum']:g}")
             b.metric('Percentage',f"{100*float(saved_payload['total'])/float(saved_payload['maximum']):.1f}%"
