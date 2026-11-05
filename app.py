@@ -29,7 +29,7 @@ from sheets_storage import SheetsStore
 from result_workflow import save_verified_result, ExistingResultConflict
 from pdf_report import generate_result_pdf, result_pdf_filename
 
-st.set_page_config(page_title='Sri Chaitanya | OMR Result Portal V2.0',page_icon='📋',layout='wide')
+st.set_page_config(page_title='Sri Chaitanya | OMR Result Portal V2.1',page_icon='📋',layout='wide')
 st.markdown('''<style>
 .block-container {max-width:1150px;padding-top:1.5rem}
 [data-testid="stFileUploader"] {border-radius:12px}
@@ -314,7 +314,7 @@ with views[0]:
                              and st.session_state['finalized_scan'].get('saved')
                              and st.session_state['finalized_scan'].get('payload'))
         if already_saved:
-            st.success('This result has already been saved. The PDF and marks are available below.')
+            st.success('Evaluation complete. Your saved result and PDF are available below. To recheck, click Evaluate OMR again.')
         with st.form('finish_review_'+signature,clear_on_submit=False):
             left,right=st.columns(2)
             with left:
@@ -430,8 +430,7 @@ with views[0]:
             saved_payload=finalized['payload']
             st.divider()
             if finalized.get('reused'):
-                st.info('This OMR was already saved. Showing the existing database result; '
-                        'no duplicate row has been created.')
+                st.success('OMR rechecked successfully. The current result is available below; no duplicate row was created.')
             else:
                 st.success('Result saved to the database successfully.')
             st.subheader('Examination Result')

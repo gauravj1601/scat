@@ -147,6 +147,33 @@ class SheetsStore:
                                 insert_data_option='INSERT_ROWS')
         return True
 
+    def update_result(self, payload):
+        """Replace the existing photo's saved evaluation without appending a row.
+
+        Preserve the record ID and original creation timestamp, so saved-result
+        links continue to work after a recheck. No spreadsheet columns change.
+        """
+        image_hash = _as_text(payload.get('image_hash', ''))
+        if not image_hash:
+            raise ValueError('Missing image fingerprint; cannot update result.')
+        hashes = _safe_call(self.results.col_values, RESULT_HEADERS.index('Image_Hash') + 1)
+        try:
+            row_idx = len(hashes) - hashes[::-1].index(image_hash)
+        except ValueError as exc:
+            raise LookupError('Previously saved OMR row could not be found.') from exc
+        if row_idx < 2:
+            raise LookupError('Previously saved OMR row could not be found.')
+        old = _safe_call(self.results.row_values, row_idx)
+        if not old or not old[0]:
+            raise LookupError('Previously saved OMR row has no record ID.')
+        row = self._result_row(payload)
+        row[0] = old[0]  # record ID
+        row[1] = old[1] if len(old) > 1 else ''  # initial save time
+        end_col = 'AC'  # 29 existing columns; do not change the Sheets schema
+        self.results.update(range_name=f'A{row_idx}:{end_col}{row_idx}',
+                            values=[row], value_input_option='RAW')
+        return True
+
     def list_results(self, limit=500):
         values = _safe_call(self.results.get_all_values)
         if len(values) <= 1:

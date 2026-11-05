@@ -71,6 +71,36 @@ class Store:
         except sqlite3.IntegrityError as e:raise DuplicateResult('This exact OMR image was saved previously.') from e
         return True
 
+    def update_result(self, payload):
+        """Update an already saved OMR by its image hash (no duplicate rows)."""
+        h = str(payload.get('image_hash') or '')
+        if not h:
+            raise ValueError('Missing image fingerprint; cannot update result.')
+        fields = ('exam_date', 'exam_type', 'class_name', 'paper_code',
+                  'paper_version', 'roll_number', 'student_name', 'total',
+                  'maximum', 'verification_status')
+        if self.is_cloud:
+            rec = {k: payload.get(k) for k in fields}
+            rec['payload'] = payload
+            response = requests.patch(
+                f'{self.url}/rest/v1/omr_results', params={'image_hash': 'eq.' + h},
+                json=rec, headers=self._headers(), timeout=20)
+            if not response.ok:
+                raise RuntimeError('Remote database update error: ' + response.text[:350])
+            if not response.json():
+                raise LookupError('Previously saved OMR row could not be found.')
+            return True
+        columns = ', '.join(f'{name}=?' for name in fields)
+        values = [payload.get(k) for k in fields]
+        values.append(json.dumps(payload))
+        with self._con() as c:
+            cur = c.execute(
+                f'UPDATE omr_results SET {columns}, payload=? WHERE image_hash=?',
+                values + [h])
+            if cur.rowcount != 1:
+                raise LookupError('Previously saved OMR row could not be found.')
+        return True
+
     def list_results(self,limit=500):
         if self.is_cloud:
             return self._get('omr_results',{'select':'id,submitted_at,exam_date,exam_type,class_name,paper_code,paper_version,roll_number,student_name,total,maximum,verification_status','order':'submitted_at.desc','limit':min(limit,1000)})
